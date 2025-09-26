@@ -1,0 +1,89 @@
+version: "3.8"
+
+services:
+  # Layanan Database (PostgreSQL)
+  postgres:
+    image: postgres:13
+    container_name: postgres_db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: microservice_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d microservice_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Layanan Caching (Redis)
+  redis:
+    image: redis:6-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Layanan Message Broker (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq_broker
+    ports:
+      - "5672:5672" # Port untuk komunikasi aplikasi
+      - "15672:15672" # Port untuk web management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running", "-q"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Layanan Produk (NestJS)
+  product-service:
+    build:
+      context: ./product-service # Lokasi Dockerfile
+    container_name: product_service_app
+    ports:
+      - "3000:3000"
+    depends_on: # Layanan ini baru berjalan setelah yang lain siap
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      # Variabel lingkungan untuk koneksi
+      DATABASE_URL: "postgresql://user:password@postgres:5432/microservice_db"
+      REDIS_URL: "redis://redis:6379"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672"
+
+  # Layanan Order (Golang)
+  order-service:
+    build:
+      context: ./order-service # Lokasi Dockerfile
+    container_name: order_service_app
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://user:password@postgres:5432/microservice_db"
+      REDIS_URL: "redis://redis:6379"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672"
+
+# Volumes untuk menyimpan data secara persisten
+volumes:
+  postgres_data:
+  redis_data:
