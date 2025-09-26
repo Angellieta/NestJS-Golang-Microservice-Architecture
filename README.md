@@ -261,7 +261,7 @@ Invoke-WebRequest -Uri http://localhost:8080/orders/product/<PRODUCT_ID>
 
 </br>
 
-## 5. Pengujian
+## 6. Pengujian
 
 **Unit Tests**
 - Product Service (NestJS):
