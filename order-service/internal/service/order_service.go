@@ -21,7 +21,7 @@ var ErrProductNotFound = errors.New("product not found")
 
 // OrderService mendefinisikan interface untuk service order.
 type OrderService interface {
-	CreateOrder(productID string, price float64, qty int) (*model.Order, error)
+	CreateOrder(correlationID, productID string, price float64, qty int) (*model.Order, error)
 	GetOrdersByProductID(productID string) ([]model.Order, error)
 }
 
@@ -44,46 +44,53 @@ func NewOrderService(repo repository.OrderRepository, publisher rabbitmq.EventPu
 }
 
 // CreateOrder berisi logika bisnis untuk membuat pesanan baru.
-func (s *orderService) CreateOrder(productID string, price float64, qty int) (*model.Order, error) {
-	// Validasi ke product-service
-	// Menggunakan nama service docker 'product-service' bukan 'localhost'
+func (s *orderService) CreateOrder(correlationID, productID string, price float64, qty int) (*model.Order, error) {
+	log.Printf("[CorrelationID: %s] Starting to create order for product %s", correlationID, productID)
+
+	// Validasi ke product-service dengan menyertakan Correlation ID
 	productURL := fmt.Sprintf("http://product-service:3000/products/%s", productID)
-	resp, err := http.Get(productURL)
+	req, _ := http.NewRequest("GET", productURL, nil)
+	req.Header.Set("x-correlation-id", correlationID) // <-- Set header
+	
+	resp, err := http.DefaultClient.Do(req) // <-- Kirim request
 	if err != nil {
-		log.Printf("Failed to call product-service: %v", err)
+		log.Printf("[CorrelationID: %s] Failed to call product-service: %v", correlationID, err)
 		return nil, errors.New("internal server error")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, ErrProductNotFound // Kembalikan error spesifik jika produk tidak ada
+		return nil, ErrProductNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New("product service returned an error")
 	}
 
-	// Logika membuat order (tetap sama seperti sebelumnya)
 	totalPrice := price * float64(qty)
 	status := "PENDING"
+	
+	// logika membuat order object
 	order := model.Order{
-		ProductID:  productID,
-		Qty:        qty,
-		TotalPrice: totalPrice,
-		Status:     status,
-		CreatedAt:  time.Now(),
+		ProductID:     productID,
+		Qty:           qty,
+		TotalPrice:    totalPrice,
+		Status:        status,
+		CorrelationID: correlationID,
+		CreatedAt:     time.Now(),
 	}
 
-	// Simpan ke database
 	err = s.repo.CreateOrder(&order)
 	if err != nil {
+		log.Printf("[CorrelationID: %s] Failed to save order to database: %v", correlationID, err)
 		return nil, err
 	}
+	log.Printf("[CorrelationID: %s] Order %s created successfully", correlationID, order.ID)
 
 	// Menerbitkan event
 	go func() {
 		err := s.publisher.Publish(order, "order.created")
 		if err != nil {
-			log.Printf("Failed to publish order.created event for order %s: %v", order.ID, err)
+			log.Printf("[CorrelationID: %s] Failed to publish event for order %s: %v", correlationID, order.ID, err)
 		}
 	}()
 

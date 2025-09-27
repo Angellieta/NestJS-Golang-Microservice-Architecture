@@ -4,16 +4,22 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+	"fmt"
 	"strings" 
 
 	"github.com/Angellieta/order-service/internal/service"
+	"github.com/go-playground/validator/v10"
 )
 
+var validate = validator.New()
+
+// DTO untuk request pembuatan order dengan aturan validasi
 type CreateOrderRequest struct {
-	ProductID string  `json:"productId"`
-	Price     float64 `json:"price"`
-	Qty       int     `json:"qty"`
+	ProductID string  `json:"productId" validate:"required,uuid"`
+	Price     float64 `json:"price"     validate:"required,gt=0"`
+	Qty       int     `json:"qty"       validate:"required,gte=1"`
 }
+
 
 type OrderHandler struct {
 	service service.OrderService
@@ -27,20 +33,30 @@ func NewOrderHandler(svc service.OrderService) *OrderHandler {
 
 // CreateOrder adalah handler untuk POST /orders juga menangani ErrProductNotFound
 func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
+	correlationID := r.Header.Get("x-correlation-id")
 	var req CreateOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	order, err := h.service.CreateOrder(req.ProductID, req.Price, req.Qty)
+	// 2. Jalankan validasi pada struct request
+	err := validate.Struct(req)
 	if err != nil {
-		// Cek apakah errornya adalah ErrProductNotFound
+		// Jika validasi gagal, kirim error yang detail
+		validationErrors := err.(validator.ValidationErrors)
+		errorMsg := fmt.Sprintf("Validation error: %s", validationErrors)
+		http.Error(w, errorMsg, http.StatusBadRequest)
+		return
+	}
+
+	// Jika validasi berhasil, lanjutkan ke service
+	order, err := h.service.CreateOrder(correlationID, req.ProductID, req.Price, req.Qty)
+	if err != nil {
 		if err == service.ErrProductNotFound {
-			http.Error(w, err.Error(), http.StatusBadRequest) // Kirim 400 Bad Request
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		// Untuk error lainnya, kirim 500 Internal Server Error
 		http.Error(w, "Failed to create order", http.StatusInternalServerError)
 		return
 	}

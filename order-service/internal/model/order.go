@@ -11,5 +11,6 @@ type Order struct {
 	Qty        int       `json:"qty" gorm:"not null"`
 	TotalPrice float64   `json:"totalPrice" gorm:"not null"`
 	Status     string    `json:"status" gorm:"not null"`
+	CorrelationID string    `json:"correlationId" gorm:"-"`
 	CreatedAt  time.Time `json:"createdAt"`
 }

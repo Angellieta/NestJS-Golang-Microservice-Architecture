@@ -14,6 +14,7 @@ class OrderEvent {
   qty: number;
   totalPrice: number;
   status: string;
+  correlationId: string;
   createdAt: string;
 }
 
@@ -29,7 +30,11 @@ export class ProductsService {
     return this.productsRepository.save(newProduct);
   }
 
-  async findOne(id: string): Promise<Product> {
+  async findOne(id: string, correlationId: string): Promise<Product> {
+    console.log(
+      `[CorrelationID: ${correlationId}] CACHE MISS: Fetching product ${id} from database...`,
+    );
+
     const product = await this.productsRepository.findOne({ where: { id } });
     if (!product) {
       throw new NotFoundException(`Product with ID "${id}" not found`);
@@ -44,8 +49,9 @@ export class ProductsService {
     queue: 'products_queue', // Nama "kotak surat" untuk service ini
   })
   public async handleOrderCreated(msg: OrderEvent) {
+    const correlationId = msg.correlationId; // Ambil ID dari pesan
     console.log(
-      `[product-service] Received order.created event: ${JSON.stringify(msg)}`,
+      `[CorrelationID: ${correlationId}] Received order.created event: ${JSON.stringify(msg)}`,
     );
 
     // Logika untuk mengurangi stok produk
@@ -54,21 +60,24 @@ export class ProductsService {
     });
 
     if (!product) {
-      console.error(`Product with ID ${msg.productId} not found.`);
-      return; // Hentikan eksekusi jika produk tidak ditemukan
+      console.error(
+        `[CorrelationID: ${correlationId}] Product with ID ${msg.productId} not found.`,
+      );
+      return;
     }
 
     // Misalkan setiap order hanya berisi 1 item dari produk tersebut
     // Mengurangi qty produk sesuai dengan qty di order
     if (product.qty >= msg.qty) {
-      // Memastikan stok cukup
       product.qty -= msg.qty;
       await this.productsRepository.save(product);
       console.log(
-        `[product-service] Product ${product.id} quantity updated to ${product.qty}`,
+        `[CorrelationID: ${correlationId}] Product ${product.id} quantity updated to ${product.qty}`,
       );
     } else {
-      console.warn(`Product ${product.id} has insufficient stock.`);
+      console.warn(
+        `[CorrelationID: ${correlationId}] Product ${product.id} has insufficient stock.`,
+      );
     }
   }
 }

@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   UseInterceptors,
+  Headers,
 } from '@nestjs/common';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { ProductsService } from './products.service';
@@ -24,11 +25,11 @@ export class ProductsController {
   // Menerapkan decorator caching di sini
   @UseInterceptors(CacheInterceptor)
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    // Menambahkan log ini untuk membuktikan cache bekerja
-    console.log(
-      `[product-service] CACHE MISS: Fetching product ${id} from database...`,
-    );
-    return this.productsService.findOne(id);
+  findOne(
+    @Param('id') id: string,
+    @Headers('x-correlation-id') correlationId: string,
+  ) {
+    // Teruskan correlationId ke service
+    return this.productsService.findOne(id, correlationId);
   }
 }

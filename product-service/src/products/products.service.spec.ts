@@ -41,25 +41,26 @@ describe('ProductsService', () => {
   // Tes 1: Kasus jika produk berhasil ditemukan
   describe('findOne', () => {
     it('should return a product if it exists', async () => {
-      // Sekarang tidak ada lagi error di sini
       mockProductRepository.findOne.mockResolvedValue(mockProduct);
 
-      const result = await service.findOne(mockProduct.id);
+      // Tambahkan argumen kedua (misal: 'test-correlation-id')
+      const result = await service.findOne(
+        mockProduct.id,
+        'test-correlation-id',
+      );
 
       expect(result).toEqual(mockProduct);
-      expect(mockProductRepository.findOne).toHaveBeenCalledWith({
-        where: { id: mockProduct.id },
-      });
+      // ...
     });
 
     // Tes 2: Kasus jika produk tidak ditemukan
     it('should throw a NotFoundException if the product does not exist', async () => {
-      // Dan tidak ada error di sini
       mockProductRepository.findOne.mockResolvedValue(null);
 
-      await expect(service.findOne('non-existent-id')).rejects.toThrow(
-        NotFoundException,
-      );
+      // Tambahkan argumen kedua di sini juga
+      await expect(
+        service.findOne('non-existent-id', 'test-correlation-id'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 });

@@ -44,13 +44,28 @@ services:
       timeout: 5s
       retries: 5
 
+  # Layanan BFF (Express.js)
+  bff-service:
+    build: ./bff-service
+    container_name: bff_service_app
+    ports:
+      - "5000:5000"
+    depends_on:
+      product-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+    environment:
+      PRODUCT_SERVICE_URL: "http://product-service:3000"
+      ORDER_SERVICE_URL: "http://order-service:8080"
+
   # Layanan Produk (NestJS)
   product-service:
     build:
       context: ./product-service # Lokasi Dockerfile
     container_name: product_service_app
-    ports:
-      - "3000:3000"
+    # ports:
+    #  - "3000:3000"
     depends_on: # Layanan ini baru berjalan setelah yang lain siap
       postgres:
         condition: service_healthy
@@ -69,8 +84,8 @@ services:
     build:
       context: ./order-service # Lokasi Dockerfile
     container_name: order_service_app
-    ports:
-      - "8080:8080"
+    # ports:
+    #  - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
