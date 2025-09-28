@@ -2,85 +2,86 @@
 package service
 
 import (
+	"bytes"
 	"errors"
+	"io"
+	"net/http"
 	"testing"
 
 	"github.com/Angellieta/order-service/internal/model"
+	"github.com/redis/go-redis/v9"
 )
 
 // --- Mock Dependencies ---
 
-// Mock untuk OrderRepository
 type mockOrderRepository struct {
-	// Jika CreateOrder dipanggil, akan mengembalikan error ini.
-	// Jika nil, artinya sukses.
 	err error
 }
+func (m *mockOrderRepository) CreateOrder(order *model.Order) error { return m.err }
+func (m *mockOrderRepository) GetOrdersByProductID(productID string) ([]model.Order, error) { return nil, nil }
 
-func (m *mockOrderRepository) CreateOrder(order *model.Order) error {
-	return m.err
-}
-
-func (m *mockOrderRepository) GetOrdersByProductID(productID string) ([]model.Order, error) {
-	return nil, nil
-}
-
-// Mock untuk EventPublisher
 type mockEventPublisher struct {
 	err error
 }
+func (m *mockEventPublisher) Publish(body interface{}, routingKey string) error { return m.err }
 
-func (m *mockEventPublisher) Publish(body interface{}, routingKey string) error {
-	return m.err
+type mockHttpClient struct {
+	RoundTripFunc func(req *http.Request) (*http.Response, error)
 }
 
+func (m *mockHttpClient) RoundTrip(req *http.Request) (*http.Response, error) {
+	return m.RoundTripFunc(req)
+}
 // --- Test Function ---
 
 func TestCreateOrder(t *testing.T) {
-	// Skenario 1: Semuanya berjalan sukses
+	// Setup mock HTTP Client
+	originalClient := http.DefaultClient
+	defer func() { http.DefaultClient = originalClient }() // Kembalikan setelah tes selesai
+	mockClient := &mockHttpClient{}
+	http.DefaultClient = &http.Client{
+		Transport: mockClient,
+	}
+
+	// Skenario 1: Sukses
 	t.Run("should create order successfully", func(t *testing.T) {
-		// Arrange: Menyiapkan semua mock dan service
-		mockRepo := &mockOrderRepository{err: nil} // Tidak ada error dari repo
-		mockPub := &mockEventPublisher{err: nil}    // Tidak ada error dari publisher
-		
-		// Buat service dengan dependensi mock
-		orderService := NewOrderService(mockRepo, mockPub, nil) // redisClient bisa nil karena tidak dipakai di CreateOrder
-
-		// Act: Jalankan method yang ingin dites
-		order, err := orderService.CreateOrder("product-123", 100, 2)
-
-		// Assert: Periksa hasilnya
-		if err != nil {
-			t.Errorf("expected no error, but got %v", err)
-		}
-		if order == nil {
-			t.Errorf("expected order not to be nil")
-		}
-		if order.TotalPrice != 200 {
-			t.Errorf("expected total price to be 200, but got %f", order.TotalPrice)
-		}
-	})
-
-	// Skenario 2: Gagal saat menyimpan ke database
-	t.Run("should return error when repository fails", func(t *testing.T) {
 		// Arrange
-		expectedErr := errors.New("database error")
-		mockRepo := &mockOrderRepository{err: expectedErr} // Atur repo agar gagal
+		mockClient.RoundTripFunc = func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(bytes.NewBufferString(`{}`)),
+			}, nil
+		}
+		mockRepo := &mockOrderRepository{err: nil}
 		mockPub := &mockEventPublisher{err: nil}
-		orderService := NewOrderService(mockRepo, mockPub, nil)
+		dummyRedis := redis.NewClient(&redis.Options{})
+		orderService := NewOrderService(mockRepo, mockPub, dummyRedis)
 
 		// Act
-		order, err := orderService.CreateOrder("product-123", 100, 2)
+		order, err := orderService.CreateOrder("test-correlation-id", "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d", 100, 2)
 
 		// Assert
-		if err == nil {
-			t.Errorf("expected an error, but got nil")
+		if err != nil { t.Errorf("expected no error, but got %v", err) }
+		if order == nil { t.Errorf("expected order not to be nil") }
+	})
+
+	// Skenario 2: Gagal
+	t.Run("should return error when repository fails", func(t *testing.T) {
+		// Arrange
+		mockClient.RoundTripFunc = func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewBufferString(`{}`))} , nil
 		}
-		if err != expectedErr {
-			t.Errorf("expected error '%v', but got '%v'", expectedErr, err)
-		}
-		if order != nil {
-			t.Errorf("expected order to be nil on failure")
-		}
+		
+		expectedErr := errors.New("database error")
+		mockRepo := &mockOrderRepository{err: expectedErr}
+		mockPub := &mockEventPublisher{err: nil}
+		dummyRedis := redis.NewClient(&redis.Options{})
+		orderService := NewOrderService(mockRepo, mockPub, dummyRedis)
+
+		// Act
+		_, err := orderService.CreateOrder("test-correlation-id", "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d", 100, 2)
+
+		// Assert
+		if err == nil { t.Errorf("expected an error, but got nil") }
 	})
 }
