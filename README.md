@@ -11,16 +11,20 @@ Proyek ini bertujuan untuk mengimplementasikan arsitektur microservice modern ya
 - Arsitektur Bersih (Clean Architecture): Pemisahan yang jelas antara lapisan logika, data, dan presentasi.
 - Caching: Pemanfaatan caching layer untuk meningkatkan performa dan mengurangi beban database.
 - Poliglot: Penggunaan dua bahasa pemrograman berbeda (NestJS & Go) dalam satu sistem yang terintegrasi.
+- Backend for Frontend (BFF): Sebuah *single entrypoint* (`localhost:5000`) yang menyederhanakan interaksi dari sisi klien dan menggabungkan data dari berbagai layanan.
+- Validasi & Error Handling: *Middleware* validasi otomatis di setiap layanan untuk memastikan integritas data yang masuk.
+- Pelacakan Terdistribusi: Implementasi **Correlation ID** (`x-correlation-id`) yang mengalir melalui semua layanan untuk kemudahan *debugging* dan pelacakan.
+
 
 
 ### Teknologi yang Digunakan
 
-- Backend: NestJS (TypeScript), Golang
+- Backend: NestJS (TypeScript), Golang, NodeJS (Express)
 - Database: PostgreSQL
 - Caching: Redis
 - Message Broker: RabbitMQ
 - Containerization: Docker & Docker Compose
-- Load Testing: k6
+- Load Testing: Jest (NestJS), Go Testing (Go), k6 (Performance)
 
 ## 2. Struktur Proyek
 
@@ -68,13 +72,18 @@ Proyek ini menggunakan pendekatan arsitektur berlapis (layered architecture) di 
 │     │     │     └── publisher.go           
 │     │     └── redis
 │     │            └── client.go              
-│     ├── Dokerfile
+│     ├── Dockerfile
 │     ├── go.mod
 │     └── go.sum
+├── bff-service
+│     ├── index.js
+│     ├── Dockerfile
+│     └── . . .
 ├── performance-tests
 │     └── create-order.js 
 └── docker-compose.yml
 ```
+
 ### Arsitektur berlapis (Layered Architecture)
 
 - `product-service`: Folder microservice yang bertanggung jawab atas semua hal yang berkaitan dengan produk (NestJS)
@@ -82,9 +91,9 @@ Proyek ini menggunakan pendekatan arsitektur berlapis (layered architecture) di 
     - `products`: Sebuah "modul" NestJS yang mengelompokkan semua logika terkait fitur produk.
       - `dto`: Folder yang mendefinisikan "bentuk" data yang diharapkan dari body request saat membuat produk baru yang berguna untuk validasi dan type safety.
       - `entities`: Folder yang merepresentasikan tabel `products` di database serta menghubungkan properti kelas ke kolom tabel.
-      - `products.controller.ts`: Pintu gerbang untuk request HTTP yang menangani routing (misalnya `GET /products/:id`), menerima request, dan memanggil method yang sesuai di `products.service.ts`.
+      - `products.controller.ts`: Pintu gerbang untuk Menangani routing HTTP dan menerima `Correlation ID` dari header.
       - `products.controller.spec.ts`: FIle unit test untuk `ProductsController`
-      - `products.service.ts`: Berisi otak atau logika bisnis untuk produk yang bertanggungjawab untuk mengambil data dari database, mengurangi stok setelah menerima event dari RabbitMQ, dan logika lainnya.
+      - `products.service.ts`: Berisi otak atau logika bisnis serta fungsi untuk mengurangi stok yang dipicu oleh event RabbitMQ dan menggunakan Correlation ID dalam log.
       - `products.service.spec.ts`: File unit test untuk `ProductsService`.
       - `products.module.ts`: Berfungsi sebagai penyatu antara `controller`, `service`, `entity` produk, serta mendaftarkannya ke aplikasi NestJS.
     - `app.module.ts`: Modul utama aplikasi yang mengimpor dan mengonfigurasi semua modul lain, termasuk `ProductsModule`, koneksi database (TypeOrmModule), koneksi RabbitMQ, dan koneksi Redis (CacheModule).
@@ -94,23 +103,72 @@ Proyek ini menggunakan pendekatan arsitektur berlapis (layered architecture) di 
 - `order-service`: Folder microservice yang bertanggung jawab atas semua hal yang berkaitan dengan pesanan (Golang)
   - `cmd/server/main.go`: Entrypoint yang melakukan semua inisialisasi koneksi ke database PostgreSQL, Redis, dan RabbitMQ. Selain itu, melakukan dependency injection (menyambungkan `repository`, `service`, dan `handler`) dan memulai server web Go.
   - `internal`: Berisi kode inti aplikasi (Golang)
-    - `handler`: Folder yang berisikan http yang didalamnya terdapat file order_handler.go yang berfungsi sebagai controller di NestJS, dimana dapat menerima request HTTP, mem-parsing JSON, memanggil service, dan menulis respons HTTP kembali ke client.
-    - `model`: Folder yang berisikan file `order.go` yang merupakan sebuah struct Go yang mendefinisikan struktur data order yang juga merepresentasikan tabel orders di database.
+    - `handler`: Folder yang menangani request HTTP, membaca `Correlation ID`, memvalidasi DTO, dan memanggil service.
+    - `model`: Folder yang berisikan file `order.go` yang merupakan sebuah struct Go yang mendefinisikan struktur data order, termasuk `CorrelationID` untuk event payload.
     - `repository`: Folder yang berisikan file `order_repository.go` memiliki fungsi seperti `CreateOrder` dan `GetOrdersByProductID` yang bertugas berkomunikasi langsung dengan database.
-    - `service`: Folder yang berisikan 2 file. `order_service.go` berisi logika bisnis seperti memvalidasi productId ke `product-service`, mengimplementasikan caching di Redis, dan memanggil publisher RabbitMQ. `order_service_test.go` merupakan unit test untuk `OrderService`.
+    - `service`: Folder yang berisikan 2 file. `order_service.go` berisi logika bisnis seperti memanggil `product-service` untuk validasi `Correlation ID`, mengimplementasikan caching di Redis, dan memanggil publisher RabbitMQ. `order_service_test.go` merupakan unit test untuk `OrderService`.
   - `pkg`: Berisi kode paket yang dapat digunakan kembali.
     - `database`: Helper untuk membuat koneksi ke PostgreSQL.
     - `rabbitmq`: Helper untuk koneksi dan mengirim pesan ke RabbitMQ.
     - `redis`: Helper untuk membuat koneksi ke Redis.
   - `Dockerfile`: Resep untuk membangun aplikasi Go menjadi binary kecil ke dalam image Docker yang efisien.
   - `go.mod` & `go.sum` : Berisi dependensi atau library eksternal yang digunakan oleh project Go.
+- `bff-service`: Folder yang bertindak sebagai lapisan untuk menangani permintaan dari client.
+  - `index.js`: Kode server Express.js yang bertanggungjawab untuk membuat serta meneruskan `Correlation ID`, menerima semua permintaan masuk dari penggunaa, meneruskan proxy permintaan tersebut ke `product-service` atau `order-service`, menggabungkan data dari beberapa layanan (`order-summary`).
+  - `Dockerfile`: Resep untuk membangun image Docker untuk layanan BFF.
 
 - `performance-test`: Berisikan file `create-order.js` yang menampung skrip tes performa yang ditulis dalam JavaScript untuk dijalankan oleh k6.
 - `docker-compose.yml`: File utama yang mendefinisikan semua layanan (`product-service`, `order-service`, `postgres`, `redis`, `rabbitmq`), mengonfigurasinya, dan memberitahu Docker bagaimana cara menjalankan semuanya secara bersamaan sebagai satu sistem yang utuh.
 </br>
 </br>
 
-## 3. Prasyarat
+```
+                                      +--------------------------------+
+                                      |         USER / CLIENT          |
+                                      +--------------------------------+
+                                                   |
+                                                   | (Request with/without X-Correlation-ID)
+                                                   v
++--------------------------------------------------------------------------------------------------+
+|                                    BFF SERVICE (Node.js/Express)                                 |
+|                                         (Port: 5000)                                             |
+| 1. Middleware:                                                                                   |
+|    - Menerima Request.                                                                           |
+|    - Membuat X-Correlation-ID jika tidak ada.                                                    |
+| 2. Meneruskan Request (Proxy) dengan menyertakan X-Correlation-ID di header.                     |
++--------------------------------------------------------------------------------------------------+
+             |                                                                 |
+(API Call with X-Correlation-ID)                                  (API Call with X-Correlation-ID)
+             |                                                                 |
+             v                                                                 v
++--------------------------------+                              +------------------------------------+
+|    ORDER SERVICE (Go)          |--(API Call for Validation)-->|      PRODUCT SERVICE (NestJS)      |
+|  (Internal Port: 8080)         |   (with X-Correlation-ID)    |       (Internal Port: 3000)        |
+|--------------------------------|                              |------------------------------------|
+| 3. Middleware Validasi:        |                              | 7. Menerima request validasi.      |
+|    - Memeriksa body request.   |                              | 8. Log dengan Correlation ID.      |
+| 4. Handler:                    |                              | 9. Cek data di DB/Redis & balas.   |
+|    - Menerima Correlation ID.  |                              |------------------------------------|
+|    - Log dengan Correlation ID.|                              | 12. Menerima Event dari RabbitMQ.  |
+| 5. Service:                    |                              | 13. Log dengan Correlation ID.     |
+|    - Menyimpan order ke DB.    |                              | 14. Kurangi stok produk di DB.     |
+|    - Menerbitkan Event ke      |                              +------------------------------------+
+|      RabbitMQ dengan           |                                                ^
+|      Correlation ID di         |                                                |
+|      dalam payload.            |                                                |
++--------------------------------+                                                |
+             |                                                                    | (Event dikonsumsi)
+             | (Event diterbitkan)                                                |
+             v                                                                    |
++--------------------------------+                                                |
+|       RABBITMQ BROKER          |------------------------------------------------+
+|      (orders_exchange)         |
++--------------------------------+
+
+```
+
+
+## 3. Prasyarat Instalasi
 
 #### Pastikan telah menginstal **Git** dan **Docker Desktop** di sistem.
 </br>
@@ -209,31 +267,30 @@ Setelah semua prasyarat terpenuhi, langkah-langkahnya sama untuk semua sistem op
     ```
 
 3.  **Aplikasi Siap!**
-    Setelah semua container berjalan, layanan akan tersedia di port berikut:
-    -   **Product Service**: `http://localhost:3000`
-    -   **Order Service**: `http://localhost:8080`
+    Semua permintaan ke aplikasi harus dilakukan melalui **BFF Service**
+    -   **BFF (Entrypoint)**: `http://localhost:5000`
     -   **RabbitMQ Management UI**: `http://localhost:15672` (login: `guest` / `guest`)
 </br>
 </br>
 
 ## 5. Penggunaan API
 
-Berikut adalah contoh **request** API menggunakan **PowerShell** untuk berinteraksi dengan layanan.
+Berikut adalah contoh **request** API, gunakan `localhost:5000` untuk semua *request*.
 
 </br>
 
-### Product Service (`:3000`)
+### Product Service
 
 #### 1. Membuat Produk Baru
 ```powershell
-Invoke-WebRequest -Uri http://localhost:3000/products -Method POST -ContentType "application/json" -Body '{"name": "Laptop Pro", "price": 2000, "qty": 25}'
+Invoke-WebRequest -Uri http://localhost:5000/products -Method POST -ContentType "application/json" -Body '{"name": "Ice Cream", "price": 2000, "qty": 25}'
 ```
 
 
 #### 2. Mengambil Produk Berdasarkan ID (Cached)
-> Ganti <PRODUCT_ID> dengan ID yang valid
+> Ganti <PRODUCT_ID> dengan ID valid yang muncul saat produk baru dibuat
 ```powershell
-Invoke-WebRequest -Uri http://localhost:3000/products/<PRODUCT_ID>
+Invoke-WebRequest -Uri http://localhost:5000/products/<PRODUCT_ID>
 ```
 
 </hr>
@@ -244,19 +301,25 @@ Invoke-WebRequest -Uri http://localhost:3000/products/<PRODUCT_ID>
 
 </br>
 
-### Order Service (:8080)
+### Order Service
 
-#### 1. Membuat Order Baru (dengan Validasi Produk)
-> Ganti <PRODUCT_ID> dengan ID yang valid
+#### 3. Membuat Order Baru (dengan Validasi Produk)
+> Ganti <PRODUCT_ID> dengan ID valid yang muncul saat produk baru dibuat
 ```powershell
-Invoke-WebRequest -Uri http://localhost:8080/orders -Method POST -ContentType "application/json" -Body '{"productId": "<PRODUCT_ID>", "price": 2000, "qty": 1}'
+Invoke-WebRequest -Uri http://localhost:5000/orders -Method POST -ContentType "application/json" -Body '{"productId": "<PRODUCT_ID>", "price": 2000, "qty": 3}'
 ```
 
 
-#### 2. Mengambil Order Berdasarkan Product ID (Cached)
-> Ganti <PRODUCT_ID> dengan ID yang valid
+#### 4. Mengambil Order Berdasarkan Product ID (Cached)
+> Ganti <PRODUCT_ID> dengan ID valid yang muncul saat produk baru dibuat
 ```powershell
-Invoke-WebRequest -Uri http://localhost:8080/orders/product/<PRODUCT_ID>
+Invoke-WebRequest -Uri http://localhost:5000/orders/product/<PRODUCT_ID>
+```
+
+#### 5. Mengambil Ringkasan Produk dan Order
+> Ganti <PRODUCT_ID> dengan ID valid yang muncul saat produk baru dibuat
+```powershell
+Invoke-WebRequest -Uri http://localhost:5000/order-summary/<PRODUCT_ID>
 ```
 
 </br>
