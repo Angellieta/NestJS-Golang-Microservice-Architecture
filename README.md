@@ -17,12 +17,10 @@ Proyek ini bertujuan untuk mengimplementasikan arsitektur microservice modern ya
 ### Teknologi yang Digunakan
 
 - Backend: NestJS (TypeScript), Golang, NodeJS (Express)
-- Backend: NestJS (TypeScript), Golang, NodeJS (Express)
 - Database: PostgreSQL
 - Caching: Redis
 - Message Broker: RabbitMQ
 - Containerization: Docker & Docker Compose
-- Load Testing: Jest (NestJS), Go Testing (Go), k6 (Performance)
 - Load Testing: Jest (NestJS), Go Testing (Go), k6 (Performance)
 
 ## 2. Struktur Proyek
@@ -298,7 +296,6 @@ Berikut adalah contoh **request** API, gunakan `localhost:5000` untuk semua _req
 
 ```powershell
 Invoke-WebRequest -Uri http://localhost:5000/products -Method POST -ContentType "application/json" -Body '{"name": "Ice Cream", "price": 2000, "qty": 25}'
-Invoke-WebRequest -Uri http://localhost:5000/products -Method POST -ContentType "application/json" -Body '{"name": "Ice Cream", "price": 2000, "qty": 25}'
 ```
 
 #### 2. Mengambil Produk Berdasarkan ID (Cached)
@@ -306,7 +303,6 @@ Invoke-WebRequest -Uri http://localhost:5000/products -Method POST -ContentType 
 > Ganti <PRODUCT_ID> dengan ID valid yang muncul saat produk baru dibuat
 
 ```powershell
-Invoke-WebRequest -Uri http://localhost:5000/products/<PRODUCT_ID>
 Invoke-WebRequest -Uri http://localhost:5000/products/<PRODUCT_ID>
 ```
 
@@ -343,7 +339,6 @@ Invoke-WebRequest -Uri http://localhost:5000/orders/product/<PRODUCT_ID>
 > Ganti <PRODUCT_ID> dengan ID valid yang muncul saat produk baru dibuat
 
 ```powershell
-Invoke-WebRequest -Uri http://localhost:5000/order-summary/<PRODUCT_ID>
 Invoke-WebRequest -Uri http://localhost:5000/order-summary/<PRODUCT_ID>
 ```
 
