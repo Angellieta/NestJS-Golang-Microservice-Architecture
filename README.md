@@ -288,7 +288,6 @@ Berikut adalah contoh **request** API, gunakan `localhost:5000` untuk semua _req
 
 </br>
 
-### Product Service
 
 ### Product Service
 
@@ -314,7 +313,6 @@ Invoke-WebRequest -Uri http://localhost:5000/products/<PRODUCT_ID>
 
 </br>
 
-### Order Service
 
 ### Order Service
 
